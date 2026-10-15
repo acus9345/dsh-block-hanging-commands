@@ -14,12 +14,12 @@ Instead: pass the message: `git commit -m "<message>"` (or `--no-edit` when amen
 ## Install
 
 ```sh
-dsh plugin --profile tui add dsh-block-hanging-commands
+dsh plugin --profile web add dsh-block-hanging-commands
 ```
 
-Use whichever profile you run (`tui`, `web`, `headless`, or one of your own). That's all the setup there is. The plugin ships its own patch layer, so it's enabled as soon as it's installed.
+That's the `web` profile, the browser UI you start with `dsh web`. If you run DSH another way, use `headless` (scripts and CI) or `acp` (editor integrations) instead. Each profile keeps its own plugin list, so add it to every profile you use. That's all the setup there is. The plugin ships its own patch layer, so it's on as soon as it's installed.
 
-To remove it: `dsh plugin --profile tui remove dsh-block-hanging-commands`.
+To remove it: `dsh plugin --profile web remove dsh-block-hanging-commands`.
 
 ### From a clone
 
@@ -30,7 +30,7 @@ git clone https://github.com/acus9345/dsh-block-hanging-commands
 cd dsh-block-hanging-commands
 npm install
 npm pack
-dsh plugin --profile tui add ./dsh-block-hanging-commands-0.1.0.tgz
+dsh plugin --profile web add ./dsh-block-hanging-commands-0.1.0.tgz
 ```
 
 ## What it catches
@@ -52,6 +52,8 @@ dsh plugin --profile tui add ./dsh-block-hanging-commands-0.1.0.tgz
 
 It looks through the usual wrappers (`sudo`, `env`, `nohup`, `npx`, `pnpm exec`, `uv run`, `bash -c '...'`) and handles pipes, `&&` chains, heredocs and redirects. So `cd app && npm run dev` is caught, but `echo q | python3` and `python3 < script.py` are not, because their input is already there. `timeout 30 npm run dev` gets through, and so does any call made with `run_in_background: true`. In both cases the command is going to end or detach anyway.
 
+It works on Windows too, where DSH runs commands through PowerShell (`pwsh`) instead of bash. There it also knows `npm.cmd`, full paths like `C:\Python312\python.exe`, the `&` call operator, `Get-Content -Wait` and `Read-Host`.
+
 I tried hard to keep false positives down. `psql -c "select 1"`, `node script.js`, `vim -es`, `git commit -F msg.txt`, `top -bn1`, `ssh host uptime` and `--help` / `--version` on anything all pass.
 
 ## Settings
@@ -62,7 +64,7 @@ Put a row like this in `~/.dsh/profiles/<profile>/cordis.patch.yml`, or in `~/.d
 - id: block-hanging-commands
   config:
     mode: deny             # or `ask` to get an approval prompt instead of a refusal
-    tools: [bash]          # shell tool names to inspect
+    tools: [bash, pwsh]    # shell tool names to inspect (pwsh is the Windows shell)
     pty: false             # set true if your shell tool runs on a PTY (dsh-tool-bash-persistent)
     disabledRules: []      # e.g. [server] if you really want the model starting dev servers
     allowPatterns: []      # regexes, e.g. ['^make serve$']

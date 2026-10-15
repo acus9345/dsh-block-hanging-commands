@@ -35,7 +35,7 @@ export interface Config {
 
 export const Config: Schema<Config> = Schema.object({
   mode: Schema.union(['deny', 'ask']).default('deny').description('deny: tell the model why and how to fix it. ask: show an approval prompt.'),
-  tools: Schema.array(Schema.string()).default(['bash']).description('Shell tool names to inspect.'),
+  tools: Schema.array(Schema.string()).default(['bash', 'pwsh']).description('Shell tool names to inspect.'),
   pty: Schema.boolean().default(false).description('Shell runs on a PTY (enables pager and sudo/apt prompt rules).'),
   disabledRules: Schema.array(Schema.union([...RULE_IDS])).default([]).description('Rules to disable.'),
   allowPatterns: Schema.array(Schema.string()).default([]).description('Regexes for commands that are always allowed.'),
@@ -67,9 +67,10 @@ export function apply(ctx: Context, config: Config): void {
     if (typeof args?.command !== 'string' || args.run_in_background === true) return next()
     const command = args.command
     if (allow.some(re => re.test(command))) return next()
-    const finding = analyzeCommand(command, { pty: config.pty, disabledRules: config.disabledRules })
+    const finding = analyzeCommand(command, { pty: config.pty, disabledRules: config.disabledRules, dialect: exec.name === 'pwsh' ? 'powershell' : 'posix' })
     if (finding === undefined) return next()
-    const text = denialText(finding)
+    // Windows `timeout` only sleeps; it cannot bound another command.
+    const text = exec.name === 'pwsh' ? denialText({ ...finding, suggestion: finding.suggestion.replace(', or bound it with `timeout <seconds>`', '') }) : denialText(finding)
     if (config.mode === 'ask') {
       return { kind: 'ask', reason: text, displayReason: { en: `This command may hang: ${finding.reason}.` } }
     }

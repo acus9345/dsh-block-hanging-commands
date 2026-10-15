@@ -34,7 +34,9 @@ const OPERATORS = ['&&', '||', '|&', ';;', '<<<', '<<-', '<<', '>>', '&>', '>&',
  * @param input - raw shell text.
  * @returns words (quotes removed) and control/redirection operators.
  */
-export function tokenize(input: string): Token[] {
+export function tokenize(input: string, dialect: ShellDialect = 'posix'): Token[] {
+  // PowerShell escapes with a backtick; a backslash is just a path separator there.
+  const escape = dialect === 'powershell' ? '`' : '\\'
   const tokens: Token[] = []
   let i = 0
   let word = ''
@@ -48,7 +50,7 @@ export function tokenize(input: string): Token[] {
   }
   while (i < input.length) {
     const ch = input[i]!
-    if (ch === '\\' && i + 1 < input.length) {
+    if (ch === escape && i + 1 < input.length) {
       if (input[i + 1] === '\n') { i += 2; continue }
       word += input[i + 1]
       raw += ch + input[i + 1]
@@ -69,7 +71,7 @@ export function tokenize(input: string): Token[] {
       let j = i + 1
       let value = ''
       while (j < input.length && input[j] !== '"') {
-        if (input[j] === '\\' && j + 1 < input.length && '"\\$`'.includes(input[j + 1]!)) {
+        if (input[j] === escape && j + 1 < input.length && (dialect === 'powershell' || '"\\$`'.includes(input[j + 1]!))) {
           value += input[j + 1]
           j += 2
           continue
@@ -147,8 +149,11 @@ const INPUT_OPS = new Set(['<', '<<<', '<<', '<<-', '<&'])
  * @param input - raw shell text.
  * @returns each simple command with its argv and stdin/background facts.
  */
-export function splitCommands(input: string): SimpleCommand[] {
-  const tokens = tokenize(input)
+/** `posix` for bash/sh, `powershell` for pwsh. */
+export type ShellDialect = 'posix' | 'powershell'
+
+export function splitCommands(input: string, dialect: ShellDialect = 'posix'): SimpleCommand[] {
+  const tokens = tokenize(input, dialect)
   const out: SimpleCommand[] = []
   let current: { words: Token[]; stdin: boolean; redirectNext: boolean } = { words: [], stdin: false, redirectNext: false }
   let pipedIn = false

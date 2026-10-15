@@ -180,3 +180,18 @@ test('pty mode enables pager and prompt rules', () => {
 test('disabledRules turns a rule off', () => {
   assert.equal(analyzeCommand('npm run dev', { pty: false, disabledRules: ['server'] }), undefined)
 })
+
+test('PowerShell: Windows paths, .exe/.cmd names, call operator, cmdlets', () => {
+  const ps = { pty: false, disabledRules: [], dialect: 'powershell' as const }
+  const rule = (c: string): string | undefined => analyzeCommand(c, ps)?.rule
+  assert.equal(rule('C:\\Python312\\python.exe'), 'repl')
+  assert.equal(rule('& "C:\\Program Files\\nodejs\\npm.cmd" run dev'), 'server')
+  assert.equal(rule('npm.cmd run dev'), 'server')
+  assert.equal(rule('Get-Content .\\app.log -Wait'), 'follow')
+  assert.equal(rule('Read-Host "name"'), 'prompt')
+  assert.equal(rule('pwsh'), 'repl')
+  assert.equal(rule('pwsh -Command "npm run dev"'), 'server')
+  assert.equal(rule('cmd /c npm start'), 'server')
+  assert.equal(rule('git commit; npm test'), 'git-editor')
+  for (const ok of ['python .\\scripts\\run.py', 'git commit -m "fix C:\\x"', 'npm run build; npm test', 'Get-Content .\\app.log -Tail 50', 'pwsh -File build.ps1']) assert.equal(rule(ok), undefined, ok)
+})

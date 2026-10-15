@@ -56,3 +56,15 @@ test('installed with `dsh plugin add`, it loads from the profile and honours the
   assert.equal(configured.exitCode, 0, configured.stderr)
   assert.doesNotMatch(configured.toolResults[0]!.result, /block-hanging-commands/)
 })
+
+test('guards the pwsh tool too (the shell DSH uses on Windows)', async () => {
+  const run = await runDsh({
+    plugins: [plugin],
+    homePatch: '- id: tool-pwsh\n  disabled: false\n- id: tool-bash\n  disabled: true\n',
+    script: [{ tool: 'pwsh', input: { description: 'Dev server', command: '& "C:\\Program Files\\nodejs\\npm.cmd" run dev' } }],
+  })
+  assert.equal(run.exitCode, 0, run.stderr)
+  assert.ok(run.requests.some(r => r.tools?.some(t => t.name === 'pwsh')), 'pwsh tool offered')
+  assert.match(run.toolResults[0]!.result, /block-hanging-commands stopped/)
+  assert.doesNotMatch(run.toolResults[0]!.result, /timeout <seconds>/)
+})

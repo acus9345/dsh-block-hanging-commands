@@ -8,7 +8,7 @@
  * model can retry immediately.
  */
 
-import { splitCommands, type SimpleCommand } from './shell.ts'
+import { splitCommands, type ShellDialect, type SimpleCommand } from './shell.ts'
 
 /** Identifier of one rule; usable in `disabledRules`. */
 export type RuleId =
@@ -50,6 +50,8 @@ export interface AnalyzeOptions {
   pty: boolean
   /** Rules to skip. */
   disabledRules?: readonly RuleId[]
+  /** Quoting rules of the shell that runs the command. */
+  dialect?: ShellDialect
 }
 
 interface Cmd {
@@ -79,9 +81,10 @@ const shortCluster = (args: readonly string[], letters: string): boolean => {
 
 const positionals = (args: readonly string[]): string[] => args.filter(a => !a.startsWith('-'))
 
+/** Program name without its folder or Windows extension: `C:\\Tools\\npm.cmd` → `npm`. */
 const basename = (path: string): string => {
-  const slash = path.lastIndexOf('/')
-  return (slash === -1 ? path : path.slice(slash + 1)).toLowerCase()
+  const slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return (slash === -1 ? path : path.slice(slash + 1)).toLowerCase().replace(/\.(?:exe|cmd|bat|ps1|com)$/, '')
 }
 
 const BG = 'run it with `run_in_background: true` (then read its output with the job tools), or bound it with `timeout <seconds>`'
@@ -231,6 +234,10 @@ const repl: Rule = (c) => {
   if (['bash', 'sh', 'zsh', 'fish', 'dash', 'ksh'].includes(c.prog)) {
     if (has(a, '-c', '-s') || pos.length > 0 || has(a, '--version', '--help')) return undefined
     return replFinding(c.prog, 'run the commands directly, or pass them with `-c`')
+  }
+  if (c.prog === 'pwsh' || c.prog === 'powershell') {
+    if (pos.length > 0 || a.some(x => /^-(?:c|command|f|file|encodedcommand|version|help|\?)$/i.test(x))) return undefined
+    return replFinding(c.prog, 'run the commands directly, or pass them with `-Command "..."`')
   }
   return undefined
 }
@@ -516,6 +523,9 @@ const server: Rule = (c) => {
 
 const follow: Rule = (c) => {
   const a = c.args
+  if (['get-content', 'gc', 'cat', 'type'].includes(c.prog) && a.some(x => /^-wait$/i.test(x))) {
+    return { reason: '`Get-Content -Wait` follows the file forever', suggestion: 'use `Get-Content <file> -Tail 200` (without `-Wait`)' }
+  }
   if (c.prog === 'tail' && (has(a, '-f', '-F', '--follow') || a.some(x => /^--follow=/.test(x) || /^-[0-9]*[fF]$/.test(x)))) {
     return { reason: '`tail -f` follows the file forever', suggestion: 'use `tail -n 200 <file>` (without `-f`)' }
   }
@@ -552,6 +562,9 @@ const follow: Rule = (c) => {
 
 const prompt: Rule = (c) => {
   const a = c.args
+  if (c.prog === 'read-host' || c.prog === 'pause' || (c.prog === 'cmd' && a.length === 0)) {
+    return { reason: `\`${c.prog}\` waits for someone to type at the console`, suggestion: 'pass the value directly, or ask the user in chat' }
+  }
   if ((c.prog === 'npm' || c.prog === 'yarn') && (a[0] === 'init' && positionals(a).length === 1) && !has(a, '-y', '--yes')) {
     return { reason: `\`${c.prog} init\` asks a series of questions`, suggestion: `use \`${c.prog} init -y\`` }
   }
@@ -702,7 +715,7 @@ const SOLE_HELP = new Set(['-h', '-V', '-v', 'help', 'version'])
  */
 export function analyzeCommand(command: string, options: AnalyzeOptions, depth = 0): Finding | undefined {
   const disabled = new Set(options.disabledRules ?? [])
-  for (const simple of splitCommands(command)) {
+  for (const simple of splitCommands(command, options.dialect)) {
     if (simple.backgrounded) continue
     const finding = analyzeSimple(simple, options, disabled, depth)
     if (finding !== undefined) return finding
@@ -715,9 +728,18 @@ function analyzeSimple(simple: SimpleCommand, options: AnalyzeOptions, disabled:
   if (unwrapped === undefined || unwrapped.argv.length === 0) return undefined
   const [first, ...args] = unwrapped.argv
   const prog = basename(first!)
+  if (prog === '&' && args.length > 0 && depth < 3) return analyzeSimple({ ...simple, argv: args }, options, disabled, depth + 1)
+  if (prog === 'cmd' && depth < 3) {
+    const ci = args.findIndex(a => /^\/[ck]$/i.test(a))
+    if (ci !== -1 && args.length > ci + 1) return analyzeCommand(args.slice(ci + 1).join(' '), { ...options, dialect: 'posix' }, depth + 1)
+  }
+  if ((prog === 'pwsh' || prog === 'powershell') && depth < 3) {
+    const ci = args.findIndex(a => /^-(?:c|command)$/i.test(a))
+    if (ci !== -1 && args.length > ci + 1) return analyzeCommand(args.slice(ci + 1).join(' '), { ...options, dialect: 'powershell' }, depth + 1)
+  }
   if (['bash', 'sh', 'zsh', 'dash', 'ksh'].includes(prog) && depth < 3) {
     const ci = args.findIndex(a => a === '-c' || /^-[a-z]*c$/.test(a))
-    if (ci !== -1 && args[ci + 1] !== undefined) return analyzeCommand(args[ci + 1]!, options, depth + 1)
+    if (ci !== -1 && args[ci + 1] !== undefined) return analyzeCommand(args[ci + 1]!, { ...options, dialect: 'posix' }, depth + 1)
   }
   if (args.some(a => HELP.has(a)) || (args.length === 1 && SOLE_HELP.has(args[0]!))) return undefined
   const cmd: Cmd = {

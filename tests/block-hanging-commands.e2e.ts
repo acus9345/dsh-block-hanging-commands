@@ -67,4 +67,18 @@ test('guards the pwsh tool too (the shell DSH uses on Windows)', async () => {
   assert.ok(run.requests.some(r => r.tools?.some(t => t.name === 'pwsh')), 'pwsh tool offered')
   assert.match(run.toolResults[0]!.result, /block-hanging-commands stopped/)
   assert.doesNotMatch(run.toolResults[0]!.result, /timeout <seconds>/)
+  assert.match(run.toolResults[0]!.result, /timeoutMs/)
+})
+
+test('a dev server with its own timeoutMs is let through, an editor is not', async () => {
+  const run = await runDsh({
+    plugins: [plugin],
+    script: [
+      { tool: 'bash', input: { description: 'Dev server', command: 'npm run dev', timeoutMs: 20000 } },
+      { tool: 'bash', input: { description: 'Edit', command: 'vim notes.txt', timeoutMs: 20000 } },
+    ],
+  })
+  assert.equal(run.exitCode, 0, run.stderr)
+  assert.doesNotMatch(run.toolResults[0]!.result, /block-hanging-commands/)
+  assert.match(run.toolResults[1]!.result, /block-hanging-commands stopped `vim notes.txt`/)
 })

@@ -48,9 +48,11 @@ export const Config: Schema<Config> = Schema.object({
  */
 export function denialText(finding: Finding): string {
   const because = finding.reason.startsWith('`') ? finding.reason : `it ${finding.reason}`
-  return `dsh-block-hanging-commands stopped \`${finding.command}\` before it ran, because ${because}, so the tool call would never return. `
+  return `dsh-block-hanging-commands stopped \`${finding.command}\` before it ran, because ${because}, so the tool call would just sit there until it timed out. `
     + `Instead: ${finding.suggestion}. (rule: ${finding.rule})`
 }
+
+const BOUNDED_BY_TIMEOUT: ReadonlySet<RuleId> = new Set(['server', 'watch', 'follow'])
 
 export function apply(ctx: Context, config: Config): void {
   const tools = new Set(config.tools)
@@ -63,14 +65,17 @@ export function apply(ctx: Context, config: Config): void {
   })
   ctx.on('tools/pre-execute', async (exec: ToolExecution, next: () => Promise<PreToolDecision>) => {
     if (!tools.has(exec.name)) return next()
-    const args = exec.arguments as { command?: unknown; run_in_background?: unknown } | null
+    const args = exec.arguments as { command?: unknown; run_in_background?: unknown; timeoutMs?: unknown } | null
     if (typeof args?.command !== 'string' || args.run_in_background === true) return next()
     const command = args.command
     if (allow.some(re => re.test(command))) return next()
     const finding = analyzeCommand(command, { pty: config.pty, disabledRules: config.disabledRules, dialect: exec.name === 'pwsh' ? 'powershell' : 'posix' })
     if (finding === undefined) return next()
+    // A timeout the model chose bounds a long-running command the same way `timeout N` does.
+    // It doesn't help a command waiting for input: that only moves to the background, still stuck.
+    if (typeof args.timeoutMs === 'number' && BOUNDED_BY_TIMEOUT.has(finding.rule)) return next()
     // Windows `timeout` only sleeps; it cannot bound another command.
-    const text = exec.name === 'pwsh' ? denialText({ ...finding, suggestion: finding.suggestion.replace(', or bound it with `timeout <seconds>`', '') }) : denialText(finding)
+    const text = exec.name === 'pwsh' ? denialText({ ...finding, suggestion: finding.suggestion.replace('bound it with `timeout <seconds>`', 'set a short `timeoutMs`') }) : denialText(finding)
     if (config.mode === 'ask') {
       return { kind: 'ask', reason: text, displayReason: { en: `This command may hang: ${finding.reason}.` } }
     }

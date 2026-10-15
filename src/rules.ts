@@ -560,9 +560,10 @@ const follow: Rule = (c) => {
   return undefined
 }
 
-const prompt: Rule = (c) => {
+const prompt: Rule = (c, o) => {
   const a = c.args
-  if (c.prog === 'read-host' || c.prog === 'pause' || (c.prog === 'cmd' && a.length === 0)) {
+  // Read-Host and pause fail at once in a non-interactive pwsh, so they only hang on a PTY.
+  if (((c.prog === 'read-host' || c.prog === 'pause') && o.pty) || (c.prog === 'cmd' && a.length === 0)) {
     return { reason: `\`${c.prog}\` waits for someone to type at the console`, suggestion: 'pass the value directly, or ask the user in chat' }
   }
   if ((c.prog === 'npm' || c.prog === 'yarn') && (a[0] === 'init' && positionals(a).length === 1) && !has(a, '-y', '--yes')) {

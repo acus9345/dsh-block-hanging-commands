@@ -6,7 +6,7 @@ This plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harne
 
 ```
 dsh-block-hanging-commands stopped `git commit` before it ran, because `git commit`
-without a message opens an editor, so the tool call would never return.
+without a message opens an editor, so the tool call would just sit there until it timed out.
 Instead: pass the message: `git commit -m "<message>"` (or `--no-edit` when amending).
 (rule: git-editor)
 ```
@@ -50,9 +50,9 @@ dsh plugin --profile web add ./dsh-block-hanging-commands-0.1.0.tgz
 | `prompt` / `login` | `npm init` without `-y`, `crontab -e`, `gh auth login`, `aws configure` | the non-interactive flags, or ask the user |
 | `pager`, `tty-prompt` | `less file`, `sudo` asking for a password | only on a PTY shell, see below |
 
-It looks through the usual wrappers (`sudo`, `env`, `nohup`, `npx`, `pnpm exec`, `uv run`, `bash -c '...'`) and handles pipes, `&&` chains, heredocs and redirects. So `cd app && npm run dev` is caught, but `echo q | python3` and `python3 < script.py` are not, because their input is already there. `timeout 30 npm run dev` gets through, and so does any call made with `run_in_background: true`. In both cases the command is going to end or detach anyway.
+It looks through the usual wrappers (`sudo`, `env`, `nohup`, `npx`, `pnpm exec`, `uv run`, `bash -c '...'`) and handles pipes, `&&` chains, heredocs and redirects. So `cd app && npm run dev` is caught, but `echo q | python3` and `python3 < script.py` are not, because their input is already there. `timeout 30 npm run dev` gets through, and so does any call made with `run_in_background: true`. In both cases the command is going to end or detach anyway. A dev server, watcher or `tail -f` called with the shell tool's own `timeoutMs` also gets through, since that bounds it the same way. An editor or prompt still doesn't, because a timeout just leaves it waiting in the background.
 
-It works on Windows too, where DSH runs commands through PowerShell (`pwsh`) instead of bash. There it also knows `npm.cmd`, full paths like `C:\Python312\python.exe`, the `&` call operator, `Get-Content -Wait` and `Read-Host`.
+It works on Windows too, where DSH runs commands through PowerShell (`pwsh`) instead of bash. There it also knows `npm.cmd`, full paths like `C:\Python312\python.exe`, the `&` call operator and `Get-Content -Wait`.
 
 I tried hard to keep false positives down. `psql -c "select 1"`, `node script.js`, `vim -es`, `git commit -F msg.txt`, `top -bn1`, `ssh host uptime` and `--help` / `--version` on anything all pass.
 

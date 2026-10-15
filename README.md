@@ -21,6 +21,18 @@ Use whichever profile you run (`tui`, `web`, `headless`, or one of your own). Th
 
 To remove it: `dsh plugin --profile tui remove dsh-block-hanging-commands`.
 
+### From a clone
+
+Before the package is on npm, or to try local changes, build a tarball and install that:
+
+```sh
+git clone https://github.com/acus9345/dsh-block-hanging-commands
+cd dsh-block-hanging-commands
+npm install
+npm pack
+dsh plugin --profile tui add ./dsh-block-hanging-commands-0.1.0.tgz
+```
+
 ## What it catches
 
 | Rule | Examples | What the model is told to do instead |
@@ -74,4 +86,4 @@ The install test runs `dsh plugin add`, which needs `pnpm` on your PATH.
 
 The e2e suite also packs the plugin and installs it with `dsh plugin add`, the same way a user would, to make sure the published package actually loads.
 
-MIT licensed.
+MIT licensed. Written by [acus9345](https://github.com/acus9345). Bug reports and ideas are welcome in the issues.

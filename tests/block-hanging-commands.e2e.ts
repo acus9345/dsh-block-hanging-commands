@@ -15,11 +15,11 @@ test('a real dsh run denies a dev server and lets the follow-up command run', as
   assert.equal(run.exitCode, 0, run.stderr)
   assert.equal(run.toolResults.length, 2, JSON.stringify(run.events))
   const [denied, ran] = run.toolResults
-  assert.match(denied!.result, /block-hanging-commands blocked this command/)
+  assert.match(denied!.result, /block-hanging-commands stopped `/)
   assert.match(denied!.result, /run_in_background/)
   assert.match(ran!.result, /block-hanging-commands-ok/)
   // The model saw the denial text in its next request.
-  assert.match(JSON.stringify(run.requests.at(-2)), /block-hanging-commands blocked/)
+  assert.match(JSON.stringify(run.requests.at(-2)), /block-hanging-commands stopped/)
 })
 
 test('run_in_background bypasses the guard', async () => {
@@ -46,7 +46,7 @@ test('installed with `dsh plugin add`, it loads from the profile and honours the
     script: [{ tool: 'bash', input: { description: 'Edit', command: 'vim notes.txt' } }],
   })
   assert.equal(installed.exitCode, 0, installed.stderr)
-  assert.match(installed.toolResults[0]!.result, /block-hanging-commands blocked this command/)
+  assert.match(installed.toolResults[0]!.result, /block-hanging-commands stopped `/)
 
   const configured = await runDsh({
     installed: true,

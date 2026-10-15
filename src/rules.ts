@@ -87,7 +87,15 @@ const basename = (path: string): string => {
 const BG = 'run it with `run_in_background: true` (then read its output with the job tools), or bound it with `timeout <seconds>`'
 
 const EDITORS = new Set(['vi', 'vim', 'nvim', 'nano', 'pico', 'micro', 'joe', 'emacs', 'ed', 'ex', 'kak', 'hx', 'helix', 'mcedit', 'jed', 'ne'])
+/** GUI editors that only block when told to wait for the window to close. */
+const WAITING_EDITORS = new Set(['code', 'code-insiders', 'cursor', 'windsurf', 'subl', 'zed', 'mate', 'gedit', 'kate'])
 const editor: Rule = (c) => {
+  if (WAITING_EDITORS.has(c.prog) && (has(c.args, '--wait') || shortCluster(c.args, 'w'))) {
+    return {
+      reason: `opens \`${c.prog}\` and waits for its window to be closed`,
+      suggestion: 'edit files with the write/edit tools instead',
+    }
+  }
   if (!EDITORS.has(c.prog)) return undefined
   if (c.prog === 'emacs' && has(c.args, '--batch', '-batch', '--script')) return undefined
   if ((c.prog === 'vim' || c.prog === 'nvim' || c.prog === 'ex' || c.prog === 'vi') && (has(c.args, '-es', '-Es', '--headless') || c.args.some(a => a.startsWith('+') && c.args.includes('+q')))) return undefined
@@ -135,7 +143,7 @@ const tui: Rule = (c) => {
   }
   const alt = TUIS.get(c.prog)
   if (alt === undefined) return undefined
-  if (c.prog === 'top' && (has(c.args, '-b') || shortCluster(c.args, 'b'))) return undefined
+  if (c.prog === 'top' && c.args.some(a => /^-[A-Za-z]*b/.test(a))) return undefined
   if (c.prog === 'iotop' && has(c.args, '-b', '--batch')) return undefined
   if (c.prog === 'tmux') {
     const sub = positionals(c.args)[0]
@@ -472,7 +480,7 @@ const server: Rule = (c) => {
   const script = scriptName(c)
   if (script !== undefined) {
     if (SERVER_SCRIPTS.test(script) && script !== 'start:prod-build') {
-      return { reason: `\`${c.prog} ${script}\` usually starts a long-running server or watcher that never exits`, suggestion: `${BG}; then probe it with \`curl\`` }
+      return { reason: `\`${c.prog} run ${script}\` usually starts a long-running server or watcher that never exits`, suggestion: `${BG}; then probe it with \`curl\`` }
     }
     return undefined
   }

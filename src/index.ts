@@ -47,7 +47,8 @@ export const Config: Schema<Config> = Schema.object({
  * @returns one paragraph naming the problem and the alternative.
  */
 export function denialText(finding: Finding): string {
-  return `dsh-block-hanging-commands blocked this command before it ran: \`${finding.command}\` ${finding.reason}, so the tool call would never return. `
+  const because = finding.reason.startsWith('`') ? finding.reason : `it ${finding.reason}`
+  return `dsh-block-hanging-commands stopped \`${finding.command}\` before it ran, because ${because}, so the tool call would never return. `
     + `Instead: ${finding.suggestion}. (rule: ${finding.rule})`
 }
 

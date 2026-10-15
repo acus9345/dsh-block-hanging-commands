@@ -66,7 +66,7 @@ interface Cmd {
 type Rule = (cmd: Cmd, opts: AnalyzeOptions) => Omit<Finding, 'rule' | 'command'> | undefined
 
 const has = (args: readonly string[], ...flags: string[]): boolean =>
-  args.some(a => flags.includes(a) || flags.some(f => f.startsWith('--') && a.startsWith(`${f}=`)))
+  args.some(a => flags.includes(a) || flags.some(f => f.startsWith('--') && a.startsWith(`${f}=`) && !/=(?:false|0|no)$/i.test(a)))
 
 /** True when a short-flag cluster such as `-it` contains every given letter. */
 const shortCluster = (args: readonly string[], letters: string): boolean => {
@@ -414,6 +414,8 @@ const watch: Rule = (c, o) => {
 }
 
 const SERVER_SCRIPTS = /^(dev|develop|start|serve|server|preview|watch|storybook|start:dev|dev:.*|serve:.*|start:.*)$/
+/** `dev:build`, `start:migrate` and friends are one-shot tasks despite the prefix. */
+const ONE_SHOT_SCRIPT = /[:_-](?:build|lint|test|check|types?|typecheck|clean|gen|generate|codegen|format|fmt|setup|db|migrate|seed|install|prepare|deps|docs?|once|ci)(?:$|[:_-])/
 const SERVER_PROGS: Record<string, (args: string[]) => boolean> = {
   next: (a) => a[0] === 'dev' || a[0] === 'start',
   vite: (a) => a[0] === undefined || a[0].startsWith('-') || ['dev', 'serve', 'preview'].includes(a[0]),
@@ -474,12 +476,12 @@ const SERVER_PROGS: Record<string, (args: string[]) => boolean> = {
   mitmproxy: () => true,
   mitmweb: () => true,
   'php-fpm': (a) => has(a, '-F', '--nodaemonize'),
-  yes: () => true,
+  yes: () => false,
 }
 const server: Rule = (c) => {
   const script = scriptName(c)
   if (script !== undefined) {
-    if (SERVER_SCRIPTS.test(script) && script !== 'start:prod-build') {
+    if (SERVER_SCRIPTS.test(script) && !ONE_SHOT_SCRIPT.test(script)) {
       return { reason: `\`${c.prog} run ${script}\` usually starts a long-running server or watcher that never exits`, suggestion: `${BG}; then probe it with \`curl\`` }
     }
     return undefined
@@ -503,6 +505,8 @@ const server: Rule = (c) => {
     if (has(c.args, '-d', '--detach', '--wait', '--abort-on-container-exit', '--exit-code-from')) return undefined
     return { reason: '`compose up` without `-d` attaches to container logs and never exits', suggestion: 'add `-d` (or `--wait`), then check `docker compose ps` / `docker compose logs --tail 100`' }
   }
+  // `yes` on its own floods the output forever; `yes | cmd` is the usual way to answer prompts.
+  if (c.prog === 'yes' && !c.piped) return { reason: '`yes` prints forever and never exits', suggestion: 'pipe it into the command that needs answers (`yes | <command>`), or drop it' }
   const check = SERVER_PROGS[c.prog]
   if (check !== undefined && check(c.args) && !has(c.args, '--help', '-h', '--version')) {
     return { reason: `\`${c.prog}\` starts a long-running process that never exits`, suggestion: `${BG}; then probe it with \`curl\`` }

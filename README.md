@@ -70,6 +70,8 @@ npm test           # unit tests for the command parser and rules
 npm run test:e2e   # boots real dsh against a scripted local model, no API key needed
 ```
 
+The install test runs `dsh plugin add`, which needs `pnpm` on your PATH.
+
 The e2e suite also packs the plugin and installs it with `dsh plugin add`, the same way a user would, to make sure the published package actually loads.
 
 MIT licensed.

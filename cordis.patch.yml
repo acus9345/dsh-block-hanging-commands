@@ -1,0 +1,14 @@
+# dsh-block-hanging-commands: inspect shell commands before they run.
+# Override settings by restating this row's whole `config` in a later layer
+# (e.g. $DSH_HOME/profiles/<profile>/cordis.patch.yml):
+#
+# - id: block-hanging-commands
+#   config:
+#     mode: deny          # or ask
+#     tools: [bash]
+#     pty: false          # true for dsh-tool-bash-persistent
+#     disabledRules: []
+#     allowPatterns: []
+- insert:
+    - id: block-hanging-commands
+      name: dsh-block-hanging-commands

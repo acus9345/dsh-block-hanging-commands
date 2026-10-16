@@ -1,6 +1,6 @@
 # dsh-block-hanging-commands
 
-English | [中文](README.zh.md)
+English | [中文](README_zh.md)
 
 If you've used an agent for a while you've probably seen this. It runs `git commit` without `-m`, or `npm run dev`, or `python3` with nothing after it, and the turn just sits there. The command is waiting for a keyboard nobody is typing on. Usually the tool times out, the model learns nothing, and then it tries something just as bad.
 

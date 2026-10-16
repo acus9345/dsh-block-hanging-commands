@@ -1,6 +1,6 @@
 {
   "name": "dsh-block-hanging-commands",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "DeepSeek Harness plugin that stops shell commands that would hang a turn (editors, REPLs, pagers, watch modes, dev servers, tail -f, interactive logins, git commit without -m) and tells the model the non-interactive alternative.",
   "license": "MIT",
   "author": "acus9345",

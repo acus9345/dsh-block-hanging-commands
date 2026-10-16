@@ -1,5 +1,7 @@
 # dsh-block-hanging-commands
 
+English | [中文](README.zh.md)
+
 If you've used an agent for a while you've probably seen this. It runs `git commit` without `-m`, or `npm run dev`, or `python3` with nothing after it, and the turn just sits there. The command is waiting for a keyboard nobody is typing on. Usually the tool times out, the model learns nothing, and then it tries something just as bad.
 
 This plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) reads each shell command before it runs. If the command would wait for input or never exit, it doesn't run it. The model gets told why and what to run instead, so it can fix the call in the same step.
@@ -23,14 +25,14 @@ To remove it: `dsh plugin --profile web remove dsh-block-hanging-commands`.
 
 ### From a clone
 
-Before the package is on npm, or to try local changes, build a tarball and install that:
+To try local changes, build a tarball and install that:
 
 ```sh
 git clone https://github.com/acus9345/dsh-block-hanging-commands
 cd dsh-block-hanging-commands
 npm install
 npm pack
-dsh plugin --profile web add ./dsh-block-hanging-commands-0.1.0.tgz
+dsh plugin --profile web add ./dsh-block-hanging-commands-0.2.0.tgz
 ```
 
 ## What it catches

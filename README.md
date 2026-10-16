@@ -58,7 +58,9 @@ I tried hard to keep false positives down. `psql -c "select 1"`, `node script.js
 
 ## Settings
 
-Put a row like this in `~/.dsh/profiles/<profile>/cordis.patch.yml`, or in `~/.dsh/cordis.patch.yml` to cover every profile. Keys you leave out keep their defaults.
+The easy way: open **Plugins** in DSH's sidebar, click **dsh-block-hanging-commands**, change what you want and press **Save**. It applies to the next tool call, no restart needed.
+
+Or put a row like this in `~/.dsh/profiles/<profile>/cordis.patch.yml`, or in `~/.dsh/cordis.patch.yml` to cover every profile. Keys you leave out keep their defaults.
 
 ```yaml
 - id: block-hanging-commands

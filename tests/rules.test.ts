@@ -194,5 +194,59 @@ test('PowerShell: Windows paths, .exe/.cmd names, call operator, cmdlets', () =>
   assert.equal(rule('pwsh -Command "npm run dev"'), 'server')
   assert.equal(rule('cmd /c npm start'), 'server')
   assert.equal(rule('git commit; npm test'), 'git-editor')
+  assert.equal(rule('cmd /c C:\\Python312\\python.exe'), 'repl')
+  assert.equal(rule('cmd /c "C:\\Program Files\\nodejs\\npm.cmd" run dev'), 'server')
+  assert.equal(rule('pwsh -Command & "C:\\Program Files\\nodejs\\npm.cmd" run dev'), 'server')
   for (const ok of ['python .\\scripts\\run.py', 'git commit -m "fix C:\\x"', 'npm run build; npm test', 'Get-Content .\\app.log -Tail 50', 'pwsh -File build.ps1']) assert.equal(rule(ok), undefined, ok)
+})
+
+test('regression fixes: wrappers, runners, CRLF heredocs, git sequence editor, pty npx', () => {
+  // CRLF heredocs must terminate before subsequent chained commands
+  assert.equal(analyzeCommand('python3 - <<EOF\r\nprint(1)\r\nEOF\r\n&& npm run dev', { pty: false })?.rule, 'server')
+  assert.equal(analyzeCommand('python3 - <<EOF\r\nprint(1)\r\nEOF\r\n&& echo ok', { pty: false }), undefined)
+  // Noclobber redirection >| must not split as a pipe into the filename
+  assert.equal(analyzeCommand('echo hi >| top', { pty: false }), undefined)
+  // POSIX compound keywords before commands
+  assert.equal(analyzeCommand('if true; then npm run dev; fi', { pty: false })?.rule, 'server')
+  assert.equal(analyzeCommand('for f in a; do python3; done', { pty: false })?.rule, 'repl')
+  assert.equal(analyzeCommand('if false; then echo ok; else vim a.txt; fi', { pty: false })?.rule, 'editor')
+  assert.equal(analyzeCommand('! vim a.txt', { pty: false })?.rule, 'editor')
+  // Package runner value flags and watch flags without --
+  assert.equal(analyzeCommand('npm --prefix apps/web run dev', { pty: false })?.rule, 'server')
+  assert.equal(analyzeCommand('pnpm --filter api dev', { pty: false })?.rule, 'server')
+  assert.equal(analyzeCommand('pnpm -F dev build', { pty: false }), undefined)
+  assert.equal(analyzeCommand('yarn --cwd apps/web start', { pty: false })?.rule, 'server')
+  assert.equal(analyzeCommand('bun --cwd apps/web dev', { pty: false })?.rule, 'server')
+  assert.equal(analyzeCommand('pnpm test --watch', { pty: false })?.rule, 'watch')
+  assert.equal(analyzeCommand('yarn test --watch', { pty: false })?.rule, 'watch')
+  assert.equal(analyzeCommand('bun test --watch', { pty: false })?.rule, 'watch')
+  assert.equal(analyzeCommand('npm -w packages/web test', { pty: false }), undefined)
+  assert.equal(analyzeCommand('pnpm -w test', { pty: false }), undefined)
+  assert.equal(analyzeCommand('vitest --run', { pty: true }), undefined)
+  // npm exec preserves inner command flags
+  assert.equal(analyzeCommand('npm exec tsc -w', { pty: false })?.rule, 'watch')
+  assert.equal(analyzeCommand('npm exec -c "npm run dev"', { pty: false })?.rule, 'server')
+  assert.equal(analyzeCommand('npm exec psql -c "select 1" mydb', { pty: false }), undefined)
+  assert.equal(analyzeCommand('npm exec git commit -m "fix"', { pty: false }), undefined)
+  // command -v / -V inspects without running
+  assert.equal(analyzeCommand('command -v vim', { pty: false }), undefined)
+  assert.equal(analyzeCommand('command -V python3', { pty: false }), undefined)
+  assert.equal(analyzeCommand('command -pv htop', { pty: false }), undefined)
+  assert.equal(analyzeCommand('command -p vim', { pty: false })?.rule, 'editor')
+  // GIT_SEQUENCE_EDITOR only exempts rebase -i, not git commit
+  assert.equal(analyzeCommand('GIT_SEQUENCE_EDITOR=: git commit', { pty: false })?.rule, 'git-editor')
+  assert.equal(analyzeCommand('git -c sequence.editor=: commit', { pty: false })?.rule, 'git-editor')
+  assert.equal(analyzeCommand('GIT_SEQUENCE_EDITOR=: git rebase -i HEAD~2', { pty: false }), undefined)
+  // npx/pnpx on PTY still enforces tty-prompt unless -y/--yes/--no-install/--no, while server wins for npx vite
+  assert.equal(analyzeCommand('npx cowsay hi', { pty: true })?.rule, 'tty-prompt')
+  assert.equal(analyzeCommand('pnpx cowsay hi', { pty: true })?.rule, 'tty-prompt')
+  assert.equal(analyzeCommand('npx -y cowsay hi', { pty: true }), undefined)
+  assert.equal(analyzeCommand('npx vite', { pty: true })?.rule, 'server')
+  // gcloud ADC non-login subcommands vs login
+  assert.equal(analyzeCommand('gcloud auth application-default print-access-token', { pty: false }), undefined)
+  assert.equal(analyzeCommand('gcloud auth application-default login', { pty: false })?.rule, 'login')
+  // flask/python flags before subcommand or -m/-c
+  assert.equal(analyzeCommand('flask --app app run', { pty: false })?.rule, 'server')
+  assert.equal(analyzeCommand('python -u -m http.server 8000', { pty: false })?.rule, 'server')
+  assert.equal(analyzeCommand('python -c"print(1)"', { pty: false }), undefined)
 })

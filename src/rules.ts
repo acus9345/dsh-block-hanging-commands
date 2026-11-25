@@ -171,7 +171,7 @@ const repl: Rule = (c) => {
       return pos.length === 0 && !has(a, '-c') ? replFinding(c.prog, 'run a script file or `python -c "..."`') : undefined
     }
     if (has(a, '-i')) return replFinding(c.prog, 'drop `-i`; pass the code with `-c` or a script file')
-    if (has(a, '-c', '-m') || pos.length > 0) return undefined
+    if (has(a, '-c', '-m') || a.some(x => /^-[cm]./.test(x)) || pos.length > 0) return undefined
     return replFinding(c.prog, 'pass code with `python -c "..."`, a script file, or a heredoc on stdin')
   }
   if (c.prog === 'node' || c.prog === 'nodejs') {
@@ -283,19 +283,22 @@ const containerTty: Rule = (c) => {
   return undefined
 }
 
-const gitSub = (c: Cmd): { sub: string | undefined; rest: string[]; editorSet: boolean } => {
+const gitSub = (c: Cmd): { sub: string | undefined; rest: string[]; editorSet: boolean; sequenceEditorSet: boolean } => {
   let i = 0
-  let editorSet = c.env.GIT_EDITOR !== undefined || c.env.EDITOR !== undefined || c.env.GIT_SEQUENCE_EDITOR !== undefined
+  let editorSet = c.env.GIT_EDITOR !== undefined || c.env.EDITOR !== undefined
+  let sequenceEditorSet = editorSet || c.env.GIT_SEQUENCE_EDITOR !== undefined
   while (i < c.args.length && c.args[i]!.startsWith('-')) {
     const a = c.args[i]!
     if (a === '-c' || a === '-C' || a === '--git-dir' || a === '--work-tree') {
-      if (a === '-c' && /^core\.editor=|^sequence\.editor=/.test(c.args[i + 1] ?? '')) editorSet = true
+      const val = c.args[i + 1] ?? ''
+      if (a === '-c' && /^core\.editor=/.test(val)) { editorSet = true; sequenceEditorSet = true }
+      if (a === '-c' && /^sequence\.editor=/.test(val)) sequenceEditorSet = true
       i += 2
       continue
     }
     i += 1
   }
-  return { sub: c.args[i], rest: c.args.slice(i + 1), editorSet }
+  return { sub: c.args[i], rest: c.args.slice(i + 1), editorSet, sequenceEditorSet }
 }
 
 const gitEditor: Rule = (c) => {
@@ -324,8 +327,8 @@ const gitEditor: Rule = (c) => {
 
 const gitInteractive: Rule = (c) => {
   if (c.prog !== 'git') return undefined
-  const { sub, rest, editorSet } = gitSub(c)
-  if (sub === 'rebase' && has(rest, '-i', '--interactive') && !editorSet) {
+  const { sub, rest, sequenceEditorSet } = gitSub(c)
+  if (sub === 'rebase' && has(rest, '-i', '--interactive') && !sequenceEditorSet) {
     return { reason: '`git rebase -i` opens an interactive todo editor', suggestion: 'use a non-interactive rebase (`git rebase <base>`), `git commit --fixup` + `GIT_SEQUENCE_EDITOR=: git rebase -i --autosquash <base>`, or `git reset --soft`' }
   }
   if ((sub === 'add' || sub === 'checkout' || sub === 'reset' || sub === 'stash' || sub === 'restore' || sub === 'commit') && (has(rest, '-p', '--patch') || (sub === 'add' && has(rest, '-i', '--interactive')))) {
@@ -341,10 +344,29 @@ const gitInteractive: Rule = (c) => {
 }
 
 const PACKAGE_RUNNERS = new Set(['npm', 'pnpm', 'yarn', 'bun'])
+const RUNNER_VALUE_FLAGS: Record<string, ReadonlySet<string>> = {
+  npm: new Set(['--prefix', '-C', '--workspace', '-w', '--userconfig', '--cache', '--loglevel', '--registry']),
+  pnpm: new Set(['--filter', '-F', '--dir', '-C', '--config', '--store-dir', '--reporter', '--loglevel']),
+  yarn: new Set(['--cwd', '--modules-folder', '--cache-folder', '--registry']),
+  bun: new Set(['--cwd', '--config', '-c', '--env-file']),
+}
+/** Positional args of a package-manager call before `--`, skipping runner flags and their values. */
+const runnerPositionals = (prog: string, args: readonly string[]): string[] => {
+  const valueFlags = RUNNER_VALUE_FLAGS[prog]
+  const pos: string[] = []
+  for (let i = 0; i < args.length; i += 1) {
+    const a = args[i]!
+    if (a === '--') break
+    if (valueFlags?.has(a)) { i += 1; continue }
+    if (a.startsWith('-')) continue
+    pos.push(a)
+  }
+  return pos
+}
 /** The script a package-manager invocation runs, if any. */
 const scriptName = (c: Cmd): string | undefined => {
   if (!PACKAGE_RUNNERS.has(c.prog)) return undefined
-  const pos = positionals(c.args)
+  const pos = runnerPositionals(c.prog, c.args)
   const first = pos[0]
   if (first === undefined) return undefined
   if (first === 'run' || first === 'run-script') return pos[1]
@@ -405,12 +427,12 @@ const watch: Rule = (c, o) => {
   const script = scriptName(c)
   if (script !== undefined) {
     const extra = afterDoubleDash(c.args)
-    if (/(^|[:_-])watch($|[:_-])/.test(script) || has(extra, '--watch', '--watchAll', '-w')) {
+    if (/(^|[:_-])watch($|[:_-])/.test(script) || has(c.args, '--watch', '--watchAll') || has(extra, '-w')) {
       return { reason: `\`${c.prog} ${script}\` runs in watch mode and never exits`, suggestion: `run the one-shot variant (e.g. \`${c.prog} test -- --watch=false\` / \`vitest run\` / \`jest --ci\`), or ${BG}` }
     }
     return undefined
   }
-  if (c.prog === 'vitest' && o.pty && positionals(c.args)[0] === undefined) {
+  if (c.prog === 'vitest' && o.pty && positionals(c.args)[0] === undefined && !has(c.args, '--run') && !c.args.includes('--watch=false')) {
     return { reason: '`vitest` without `run` starts watch mode on a terminal', suggestion: 'use `vitest run`' }
   }
   const check = WATCH_PROGS[c.prog]
@@ -451,7 +473,7 @@ const SERVER_PROGS: Record<string, (args: string[]) => boolean> = {
   'live-server': () => true,
   'json-server': () => true,
   serve: (a) => !has(a, '--help', '-h'),
-  flask: (a) => a[0] === 'run',
+  flask: (a) => positionals(a).includes('run'),
   uvicorn: () => true,
   gunicorn: () => true,
   hypercorn: () => true,
@@ -494,12 +516,15 @@ const server: Rule = (c) => {
     return undefined
   }
   const pos = positionals(c.args)
-  if (PYTHONS.test(c.prog) && c.args[0] === '-m' && ['http.server', 'SimpleHTTPServer', 'uvicorn', 'flask', 'gunicorn', 'streamlit', 'jupyter', 'mkdocs', 'pydoc'].includes(c.args[1] ?? '')) {
-    const mod = c.args[1]!
-    if (mod === 'flask' && c.args[2] !== 'run') return undefined
-    if ((mod === 'streamlit' || mod === 'mkdocs') && !['run', 'serve'].includes(c.args[2] ?? '')) return undefined
-    if (mod === 'jupyter' && !['notebook', 'lab'].includes(c.args[2] ?? '')) return undefined
-    if (mod === 'pydoc' && !has(c.args, '-p', '-b')) return undefined
+  const modIndex = c.args.indexOf('-m')
+  const firstPosIndex = c.args.findIndex(a => !a.startsWith('-'))
+  if (PYTHONS.test(c.prog) && modIndex !== -1 && (firstPosIndex === -1 || modIndex < firstPosIndex) && ['http.server', 'SimpleHTTPServer', 'uvicorn', 'flask', 'gunicorn', 'streamlit', 'jupyter', 'mkdocs', 'pydoc'].includes(c.args[modIndex + 1] ?? '')) {
+    const mod = c.args[modIndex + 1]!
+    const modArgs = c.args.slice(modIndex + 2)
+    if (mod === 'flask' && !positionals(modArgs).includes('run')) return undefined
+    if ((mod === 'streamlit' || mod === 'mkdocs') && !['run', 'serve'].includes(modArgs[0] ?? '')) return undefined
+    if (mod === 'jupyter' && !['notebook', 'lab'].includes(modArgs[0] ?? '')) return undefined
+    if (mod === 'pydoc' && !has(modArgs, '-p', '-b')) return undefined
     return { reason: `\`python -m ${mod}\` starts a server that never exits`, suggestion: `${BG}; then probe it with \`curl\`` }
   }
   if (PYTHONS.test(c.prog) && pos.some(p => /(^|\/)manage\.py$/.test(p)) && pos.includes('runserver')) {
@@ -592,7 +617,7 @@ const login: Rule = (c) => {
   if ((c.prog === 'npm' || c.prog === 'pnpm' || c.prog === 'yarn') && (pos[0] === 'login' || pos[0] === 'adduser')) return say(`${c.prog} login`, 'write an auth token to `.npmrc` or set `NPM_TOKEN`')
   if (CONTAINER_CLIS.has(c.prog) && pos[0] === 'login' && !has(a, '--password-stdin', '-p', '--password')) return say(`${c.prog} login`, `use \`echo "$TOKEN" | ${c.prog} login -u <user> --password-stdin <registry>\``)
   if (c.prog === 'az' && pos[0] === 'login' && !has(a, '--service-principal', '--identity', '--use-device-code')) return say('az login', 'use `az login --service-principal ...` or `--identity`')
-  if (c.prog === 'gcloud' && pos[0] === 'auth' && (pos[1] === 'login' || pos[1] === 'application-default') && !has(a, '--cred-file', '--no-browser')) return say(`gcloud auth ${pos[1]}`, 'use `gcloud auth activate-service-account --key-file ...`')
+  if (c.prog === 'gcloud' && pos[0] === 'auth' && (pos[1] === 'login' || (pos[1] === 'application-default' && pos[2] === 'login')) && !has(a, '--cred-file', '--no-browser')) return say(`gcloud auth ${pos[1]}`, 'use `gcloud auth activate-service-account --key-file ...`')
   if (['firebase', 'vercel', 'netlify', 'heroku', 'wrangler', 'fly', 'flyctl', 'railway', 'supabase', 'doctl', 'expo', 'eas'].includes(c.prog) && (pos[0] === 'login' || (pos[0] === 'auth' && pos[1] === 'login')) && !has(a, '--token', '-t', '--no-localhost', '--ci')) return say(`${c.prog} login`, 'provide a token through the tool\'s documented environment variable')
   if (c.prog === 'aws' && (pos[0] === 'configure' && pos.length === 1 || (pos[0] === 'sso' && pos[1] === 'login'))) return say(`aws ${pos.join(' ')}`, 'use `aws configure set <key> <value>` or environment credentials')
   return undefined
@@ -639,16 +664,28 @@ const VALUE_WRAPPERS: Record<string, Set<string>> = {
   dotenv: new Set(['-e', '-c']),
 }
 
+const NPM_EXEC_VALUE_FLAGS = new Set(['-p', '--package', '-w', '--workspace', '--prefix', '-C', '-c', '--call'])
+
 /** Strip wrapper programs; returns undefined when a wrapper bounds the run (e.g. `timeout`). */
-function unwrap(argv: string[], env: Record<string, string>): { argv: string[]; env: Record<string, string> } | undefined {
+function unwrap(argv: string[], env: Record<string, string>, dialect: ShellDialect = 'posix'): { argv: string[]; env: Record<string, string> } | undefined {
   let words = [...argv]
   const vars = { ...env }
   for (let guard = 0; guard < 10 && words.length > 0; guard += 1) {
+    if (dialect === 'posix' && words.length > 1 && (words[0] === '!' || words[0] === 'then' || words[0] === 'do' || words[0] === 'else')) {
+      words = words.slice(1)
+      continue
+    }
     const prog = basename(words[0]!)
     if (prog === 'timeout' || prog === 'gtimeout') return undefined
     if (prog === 'nohup' || prog === 'time' || prog === 'command' || prog === 'exec' || prog === 'builtin' || prog === 'caffeinate' || prog === 'unbuffer' || prog === 'setsid') {
-      words = words.slice(1)
-      while (words[0]?.startsWith('-')) words = words.slice(1)
+      const rest = words.slice(1)
+      let i = 0
+      while (i < rest.length && rest[i]!.startsWith('-')) {
+        // `command -v` / `command -V` inspects availability without executing the target.
+        if (prog === 'command' && /^-[a-zA-Z]*[vV]/.test(rest[i]!)) return undefined
+        i += 1
+      }
+      words = rest.slice(i)
       continue
     }
     const valueFlags = VALUE_WRAPPERS[prog]
@@ -678,8 +715,14 @@ function unwrap(argv: string[], env: Record<string, string>): { argv: string[]; 
     }
     if (prog === 'npx' || prog === 'pnpx' || prog === 'bunx') {
       let i = 1
-      while (i < words.length && words[i]!.startsWith('-')) i += words[i] === '-p' || words[i] === '--package' ? 2 : 1
+      let autoYes = false
+      while (i < words.length && words[i]!.startsWith('-')) {
+        const flag = words[i]!
+        if (flag === '-y' || flag === '--yes' || flag === '--no-install' || flag === '--no') autoYes = true
+        i += flag === '-p' || flag === '--package' ? 2 : 1
+      }
       if (i >= words.length) break
+      if ((prog === 'npx' || prog === 'pnpx') && !autoYes) vars.__NPX = prog
       words = words.slice(i)
       continue
     }
@@ -696,7 +739,23 @@ function unwrap(argv: string[], env: Record<string, string>): { argv: string[]; 
     if (prog === 'bundle' && words[1] === 'exec') { words = words.slice(2); continue }
     if (prog === 'npm' && (words[1] === 'exec' || words[1] === 'x')) {
       const dash = words.indexOf('--')
-      words = dash === -1 ? words.slice(2).filter(w => !w.startsWith('-')) : words.slice(dash + 1)
+      if (dash !== -1) {
+        words = words.slice(dash + 1)
+        continue
+      }
+      let i = 2
+      let callCmd: string | undefined
+      while (i < words.length && words[i]!.startsWith('-')) {
+        const flag = words[i]!
+        if ((flag === '-c' || flag === '--call') && i + 1 < words.length) { callCmd = words[i + 1]; i += 2; continue }
+        if (flag.startsWith('--call=')) { callCmd = flag.slice('--call='.length); i += 1; continue }
+        i += NPM_EXEC_VALUE_FLAGS.has(flag) ? 2 : 1
+      }
+      if (callCmd !== undefined && i >= words.length) {
+        words = ['sh', '-c', callCmd]
+      } else {
+        words = words.slice(i)
+      }
       continue
     }
     break
@@ -707,6 +766,9 @@ function unwrap(argv: string[], env: Record<string, string>): { argv: string[]; 
 const HELP = new Set(['--help', '--version', '--usage'])
 /** Short flags that mean help/version only when they are the sole argument (`-h` is a host flag for psql, mysql, redis-cli). */
 const SOLE_HELP = new Set(['-h', '-V', '-v', 'help', 'version'])
+
+const joinShellArgs = (args: readonly string[]): string =>
+  args.length === 1 ? args[0]! : args.map(a => /\s/.test(a) && !a.includes('"') ? `"${a}"` : a).join(' ')
 
 /**
  * Analyze a full command line for hanging commands.
@@ -725,18 +787,18 @@ export function analyzeCommand(command: string, options: AnalyzeOptions, depth =
 }
 
 function analyzeSimple(simple: SimpleCommand, options: AnalyzeOptions, disabled: Set<RuleId>, depth: number): Finding | undefined {
-  const unwrapped = unwrap(simple.argv, simple.env)
+  const unwrapped = unwrap(simple.argv, simple.env, options.dialect ?? 'posix')
   if (unwrapped === undefined || unwrapped.argv.length === 0) return undefined
   const [first, ...args] = unwrapped.argv
   const prog = basename(first!)
   if (prog === '&' && args.length > 0 && depth < 3) return analyzeSimple({ ...simple, argv: args }, options, disabled, depth + 1)
   if (prog === 'cmd' && depth < 3) {
     const ci = args.findIndex(a => /^\/[ck]$/i.test(a))
-    if (ci !== -1 && args.length > ci + 1) return analyzeCommand(args.slice(ci + 1).join(' '), { ...options, dialect: 'posix' }, depth + 1)
+    if (ci !== -1 && args.length > ci + 1) return analyzeCommand(joinShellArgs(args.slice(ci + 1)), { ...options, dialect: 'powershell' }, depth + 1)
   }
   if ((prog === 'pwsh' || prog === 'powershell') && depth < 3) {
     const ci = args.findIndex(a => /^-(?:c|command)$/i.test(a))
-    if (ci !== -1 && args.length > ci + 1) return analyzeCommand(args.slice(ci + 1).join(' '), { ...options, dialect: 'powershell' }, depth + 1)
+    if (ci !== -1 && args.length > ci + 1) return analyzeCommand(joinShellArgs(args.slice(ci + 1)), { ...options, dialect: 'powershell' }, depth + 1)
   }
   if (['bash', 'sh', 'zsh', 'dash', 'ksh'].includes(prog) && depth < 3) {
     const ci = args.findIndex(a => a === '-c' || /^-[a-z]*c$/.test(a))
@@ -761,6 +823,10 @@ function analyzeSimple(simple: SimpleCommand, options: AnalyzeOptions, disabled:
     if (disabled.has(id)) continue
     const result = RULES[id](cmd, options)
     if (result !== undefined) return { rule: id, command: simple.text, ...result }
+  }
+  if (cmd.env.__NPX !== undefined && options.pty && !disabled.has('tty-prompt')) {
+    const npxFinding = RULES['tty-prompt']({ ...cmd, prog: cmd.env.__NPX, args: [] }, options)
+    if (npxFinding !== undefined) return { rule: 'tty-prompt', command: simple.text, ...npxFinding }
   }
   return undefined
 }

@@ -18,3 +18,28 @@ test('an allow pattern that is not a valid regex is skipped, not fatal', async (
   assert.equal(compiled.length, 1)
   assert.ok(compiled[0]!.test('npm run dev'))
 })
+
+test('non-positive or NaN timeoutMs does not bypass the guard', async () => {
+  const { apply } = await import('../src/index.ts')
+  let handler: ((exec: unknown, next: () => Promise<unknown>) => Promise<unknown>) | undefined
+  const fakeCtx = {
+    on(event: string, fn: typeof handler) {
+      if (event === 'tools/pre-execute') handler = fn
+    },
+  }
+  apply(fakeCtx as never, {
+    mode: 'deny',
+    tools: ['bash'],
+    pty: false,
+    disabledRules: [],
+    allowPatterns: [],
+  })
+  assert.ok(handler)
+  const next = async () => ({ kind: 'allow' })
+  for (const timeoutMs of [0, -100, Number.NaN, Number.POSITIVE_INFINITY]) {
+    const decision = await handler!({ name: 'bash', arguments: { command: 'npm run dev', timeoutMs } }, next) as { kind: string }
+    assert.equal(decision.kind, 'deny')
+  }
+  const bounded = await handler!({ name: 'bash', arguments: { command: 'npm run dev', timeoutMs: 5000 } }, next) as { kind: string }
+  assert.equal(bounded.kind, 'allow')
+})

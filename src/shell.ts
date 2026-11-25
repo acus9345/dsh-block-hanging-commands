@@ -27,7 +27,7 @@ type Token =
   | { kind: 'word'; value: string; raw: string }
   | { kind: 'op'; value: string }
 
-const OPERATORS = ['&&', '||', '|&', ';;', '<<<', '<<-', '<<', '>>', '&>', '>&', '<&', '|', ';', '&', '<', '>', '\n', '(', ')']
+const OPERATORS = ['&&', '||', '|&', ';;', '<<<', '<<-', '<<', '>>', '>|', '<>', '&>', '>&', '<&', '|', ';', '&', '<', '>', '\n', '(', ')']
 
 /**
  * Tokenize a command line into words and operators.
@@ -106,7 +106,7 @@ export function tokenize(input: string, dialect: ShellDialect = 'posix'): Token[
       flush()
       tokens.push({ kind: 'op', value: op })
       i += op.length
-      if (op === '<<' || op === '<<-') i = skipHeredoc(input, i, tokens)
+      if (op === '<<' || op === '<<-') i = skipHeredoc(input, i, tokens, dialect)
       continue
     }
     word += ch
@@ -119,7 +119,7 @@ export function tokenize(input: string, dialect: ShellDialect = 'posix'): Token[
 }
 
 /** Consume a heredoc delimiter and body; emits a placeholder word for the delimiter. */
-function skipHeredoc(input: string, start: number, tokens: Token[]): number {
+function skipHeredoc(input: string, start: number, tokens: Token[], dialect: ShellDialect): number {
   let i = start
   while (input[i] === ' ' || input[i] === '\t') i += 1
   const match = /^(['"]?)([A-Za-z0-9_.-]+)\1/.exec(input.slice(i))
@@ -132,17 +132,17 @@ function skipHeredoc(input: string, start: number, tokens: Token[]): number {
   // Keep the rest of the heredoc's first line (it may hold more of the command).
   const rest = input.slice(i, lineEnd)
   const bodyStart = lineEnd + 1
-  const terminator = new RegExp(`^[\\t ]*${delimiter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\t ]*$`, 'm')
+  const terminator = new RegExp(`^[\\t ]*${delimiter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\t ]*\\r?$`, 'm')
   const body = input.slice(bodyStart)
   const end = terminator.exec(body)
   const after = end === null ? input.length : bodyStart + end.index + end[0].length
-  tokens.push(...tokenize(rest))
+  tokens.push(...tokenize(rest, dialect))
   return after
 }
 
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
-const REDIRECT_OPS = new Set(['<', '>', '>>', '&>', '>&', '<&', '<<<', '<<', '<<-'])
-const INPUT_OPS = new Set(['<', '<<<', '<<', '<<-', '<&'])
+const REDIRECT_OPS = new Set(['<', '>', '>>', '>|', '<>', '&>', '>&', '<&', '<<<', '<<', '<<-'])
+const INPUT_OPS = new Set(['<', '<>', '<<<', '<<', '<<-', '<&'])
 
 /**
  * Split a command line into simple commands.

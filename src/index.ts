@@ -90,7 +90,7 @@ export function apply(ctx: Context, config: Config): void {
     if (finding === undefined) return next()
     // A timeout the model chose bounds a long-running command the same way `timeout N` does.
     // It doesn't help a command waiting for input: that only moves to the background, still stuck.
-    if (typeof args.timeoutMs === 'number' && BOUNDED_BY_TIMEOUT.has(finding.rule)) return next()
+    if (typeof args.timeoutMs === 'number' && Number.isFinite(args.timeoutMs) && args.timeoutMs > 0 && BOUNDED_BY_TIMEOUT.has(finding.rule)) return next()
     // Windows `timeout` only sleeps; it cannot bound another command.
     const text = exec.name === 'pwsh' ? denialText({ ...finding, suggestion: finding.suggestion.replace('bound it with `timeout <seconds>`', 'set a short `timeoutMs`') }) : denialText(finding)
     if (cfg.mode === 'ask') {
